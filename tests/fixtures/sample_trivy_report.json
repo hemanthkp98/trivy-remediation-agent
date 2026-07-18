@@ -1,0 +1,133 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "myapp:v1.2.0",
+  "ArtifactType": "container_image",
+  "Metadata": {
+    "ImageID": "sha256:abc123def456",
+    "OS": {
+      "Family": "debian",
+      "Name": "11.6"
+    }
+  },
+  "Results": [
+    {
+      "Target": "python:3.9-slim (debian 11.6)",
+      "Class": "os-pkgs",
+      "Type": "debian",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2023-2975",
+          "PkgName": "libssl1.1",
+          "InstalledVersion": "1.1.1n-0+deb11u3",
+          "FixedVersion": "1.1.1w-0+deb11u1",
+          "Severity": "HIGH",
+          "Title": "openssl: AES-SIV cipher implementation ignores empty associated data entries",
+          "Description": "Issue summary: The AES-SIV cipher implementation contains a bug that causes it to ignore empty associated data entries which are unauthenticated as a consequence.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-2975",
+            "https://www.openssl.org/news/secadv/20230714.txt"
+          ]
+        },
+        {
+          "VulnerabilityID": "CVE-2023-3817",
+          "PkgName": "libssl1.1",
+          "InstalledVersion": "1.1.1n-0+deb11u3",
+          "FixedVersion": "1.1.1w-0+deb11u1",
+          "Severity": "MEDIUM",
+          "Title": "openssl: Excessive time spent checking DH q parameter value",
+          "Description": "Issue summary: Checking excessively long DH keys or parameters may be very slow. Applications that use the functions DH_check(), DH_check_ex() or EVP_PKEY_param_check() may experience long delays.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-3817"
+          ]
+        },
+        {
+          "VulnerabilityID": "CVE-2023-0466",
+          "PkgName": "libssl1.1",
+          "InstalledVersion": "1.1.1n-0+deb11u3",
+          "FixedVersion": "1.1.1u-0+deb11u1",
+          "Severity": "MEDIUM",
+          "Title": "openssl: Certificate policy check not enabled",
+          "Description": "The function X509_VERIFY_PARAM_add0_policy() is documented to implicitly enable the certificate policy check when it is called. However the implementation of the function does not enable the check which allows a malicious user to bypass some policy checks.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-0466"
+          ]
+        },
+        {
+          "VulnerabilityID": "CVE-2023-45853",
+          "PkgName": "zlib1g",
+          "InstalledVersion": "1:1.2.11.dfsg-2+deb11u2",
+          "FixedVersion": "",
+          "Severity": "CRITICAL",
+          "Title": "zlib: integer overflow and resultant heap-based buffer overflow in zipOpenNewFileInZip4_64 via a long filename",
+          "Description": "MiniZip in zlib through 1.3 has an integer overflow and resultant heap-based buffer overflow in zipOpenNewFileInZip4_64 via a long filename, comment, or extra field. NOTE: MiniZip is not a supported part of the zlib product.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-45853"
+          ]
+        }
+      ]
+    },
+    {
+      "Target": "requirements.txt",
+      "Class": "lang-pkgs",
+      "Type": "pip",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2023-32681",
+          "PkgName": "requests",
+          "InstalledVersion": "2.28.2",
+          "FixedVersion": "2.31.0",
+          "Severity": "MEDIUM",
+          "Title": "Requests: Proxy-Authorization header leak on redirect",
+          "Description": "Requests has been identified as carrying a request to a redirect destination that reuses the Proxy-Authorization header from the original request.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-32681",
+            "https://github.com/psf/requests/security/advisories/GHSA-j8r2-6x86-q33q"
+          ]
+        },
+        {
+          "VulnerabilityID": "CVE-2024-35195",
+          "PkgName": "requests",
+          "InstalledVersion": "2.28.2",
+          "FixedVersion": "2.32.0",
+          "Severity": "MEDIUM",
+          "Title": "requests: subsequent requests to the same host ignore cert verification",
+          "Description": "When making requests through a Requests Session, if the first request is made with verify=False to disable cert verification, all subsequent requests to the same origin will continue to ignore cert verification regardless of the verify value passed to the request.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2024-35195"
+          ]
+        },
+        {
+          "VulnerabilityID": "CVE-2022-40897",
+          "PkgName": "setuptools",
+          "InstalledVersion": "65.5.0",
+          "FixedVersion": "65.5.1",
+          "Severity": "HIGH",
+          "Title": "pypa-setuptools: Regular Expression Denial of Service (ReDoS) in package_index.py",
+          "Description": "Python Packaging Authority (PyPA) setuptools before 65.5.1 allows remote attackers to cause a denial of service via HTML in a crafted package or custom PackageIndex page.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2022-40897"
+          ]
+        }
+      ]
+    },
+    {
+      "Target": "package.json",
+      "Class": "lang-pkgs",
+      "Type": "npm",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2023-26115",
+          "PkgName": "word-wrap",
+          "InstalledVersion": "1.2.3",
+          "FixedVersion": "1.2.4",
+          "Severity": "HIGH",
+          "Title": "word-wrap: ReDoS",
+          "Description": "All versions of the package word-wrap are vulnerable to Regular Expression Denial of Service (ReDoS) due to the usage of an insecure regular expression.",
+          "References": [
+            "https://nvd.nist.gov/vuln/detail/CVE-2023-26115"
+          ]
+        }
+      ]
+    }
+  ]
+}

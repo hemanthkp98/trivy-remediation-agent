@@ -1,0 +1,117 @@
+// Jenkins Pipeline
+// Add this as a Jenkinsfile in your application repository, or reference it
+// as a pipeline stage in an existing Jenkinsfile.
+//
+// Required Jenkins credentials:
+//   anthropic-api-key   — Secret text: Anthropic API key
+//   vcs-token           — Secret text: GitHub/GitLab token with repo write access
+//
+// Required parameters (can be set as pipeline parameters or environment variables):
+//   IMAGE_NAME          — Docker image name (e.g. myapp)
+//   IMAGE_TAG           — Image tag (e.g. latest, or use BUILD_NUMBER)
+//   VCS_REPO            — owner/repo for GitHub, or project ID for GitLab
+//   VCS_PROVIDER        — github or gitlab
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'IMAGE_NAME',   defaultValue: 'myapp',   description: 'Docker image name')
+        string(name: 'IMAGE_TAG',    defaultValue: 'latest',  description: 'Docker image tag')
+        string(name: 'VCS_REPO',     defaultValue: '',        description: 'GitHub owner/repo or GitLab project ID')
+        choice(name: 'VCS_PROVIDER', choices: ['github', 'gitlab'], description: 'VCS provider')
+        choice(name: 'MIN_SEVERITY', choices: ['HIGH', 'CRITICAL', 'MEDIUM'],
+               description: 'Minimum severity level to remediate')
+    }
+
+    environment {
+        IMAGE_REF = "${params.IMAGE_NAME}:${params.IMAGE_TAG}"
+    }
+
+    stages {
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${env.IMAGE_REF} ."
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                sh """
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v \$(pwd):/output \
+                        aquasec/trivy:latest image \
+                            --format json \
+                            --output /output/trivy-report.json \
+                            --severity ${params.MIN_SEVERITY},CRITICAL \
+                            --exit-code 0 \
+                        ${env.IMAGE_REF}
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'trivy-report.json', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Auto-Remediate') {
+            when {
+                // Only remediate on the main branch, not feature branches
+                branch 'main'
+            }
+            steps {
+                withCredentials([
+                    string(credentialsId: 'anthropic-api-key', variable: 'ANTHROPIC_API_KEY'),
+                    string(credentialsId: 'vcs-token',         variable: 'VCS_TOKEN'),
+                ]) {
+                    // Configure git identity for the commit
+                    sh """
+                        git config user.email "trivy-bot@noreply.local"
+                        git config user.name  "Trivy Remediation Bot"
+                    """
+
+                    // Write a temporary config override with the VCS details
+                    writeFile file: 'remediation-config.yaml', text: """
+min_severity: ${params.MIN_SEVERITY}
+vcs:
+  provider: ${params.VCS_PROVIDER}
+  repo: "${params.VCS_REPO}"
+  base_branch: main
+  token_env: VCS_TOKEN
+"""
+
+                    // Run the agent (assumes it is installed in the Jenkins agent environment)
+                    // Alternative: use the Docker image:
+                    //   docker run --rm -v \$(pwd):/repo -v \$(pwd)/trivy-report.json:/report.json ...
+                    sh """
+                        python -m src.main \
+                            --report trivy-report.json \
+                            --repo . \
+                            --config remediation-config.yaml \
+                            --severity ${params.MIN_SEVERITY}
+                    """
+                }
+            }
+            post {
+                always {
+                    sh 'rm -f remediation-config.yaml'
+                }
+                success {
+                    echo 'Remediation complete — check the repository for a new PR.'
+                }
+                failure {
+                    echo 'Remediation encountered an error. Check the logs above.'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}

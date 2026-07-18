@@ -1,0 +1,91 @@
+# GitLab CI snippet — add these stages/jobs to your .gitlab-ci.yml
+#
+# Required CI/CD variables (set in GitLab → Settings → CI/CD → Variables):
+#   ANTHROPIC_API_KEY   — Anthropic API key (masked)
+#   VCS_TOKEN           — GitLab personal access token with api + write_repository scopes (masked)
+#   GITLAB_PROJECT_ID   — Numeric project ID (shown in Project → Settings → General)
+
+stages:
+  - build
+  - scan
+  - remediate
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+build-image:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE_TAG .
+    - docker push $IMAGE_TAG
+  artifacts:
+    reports: {}
+  only:
+    - main
+    - merge_requests
+
+# ── Trivy Scan ────────────────────────────────────────────────────────────────
+trivy-scan:
+  stage: scan
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  variables:
+    IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    MIN_SEVERITY: "HIGH"
+  script:
+    - trivy image
+        --format json
+        --output trivy-report.json
+        --severity $MIN_SEVERITY,CRITICAL
+        --exit-code 0
+        $IMAGE_TAG
+  artifacts:
+    paths:
+      - trivy-report.json
+    expire_in: 7 days
+    when: always
+  dependencies:
+    - build-image
+  only:
+    - main
+    - merge_requests
+
+# ── Auto-Remediation ──────────────────────────────────────────────────────────
+trivy-auto-remediate:
+  stage: remediate
+  image: python:3.12-slim
+  variables:
+    MIN_SEVERITY: "HIGH"
+    GIT_STRATEGY: clone
+    GIT_DEPTH: 0   # full history to allow branch creation
+  before_script:
+    # Install git and the agent's dependencies
+    - apt-get update && apt-get install -y --no-install-recommends git
+    - git config --global user.email "trivy-bot@noreply.local"
+    - git config --global user.name "Trivy Remediation Bot"
+    # Authenticate git pushes via the token
+    - git remote set-url origin
+        "https://oauth2:${VCS_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    # Install agent dependencies (assumes this repo is checked out alongside your app)
+    # Adjust the path if trivy-remediation-agent is a separate repo/submodule
+    - pip install --no-cache-dir anthropic pydantic pyyaml requests click rich
+  script:
+    - python -m src.main
+        --report trivy-report.json
+        --repo .
+        --severity $MIN_SEVERITY
+  after_script:
+    - echo "Remediation complete. Check for a new merge request in the project."
+  dependencies:
+    - trivy-scan
+  environment:
+    name: security/remediation
+  rules:
+    # Only run on the default branch, not on MRs (to avoid loops)
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  allow_failure: true   # Don't block the pipeline if remediation fails

@@ -1,0 +1,105 @@
+# .github/workflows/trivy-auto-remediate.yml
+#
+# Add this file to your application repository as:
+#   .github/workflows/trivy-auto-remediate.yml
+#
+# This workflow runs AFTER a Trivy scan and automatically opens a PR
+# to fix any HIGH/CRITICAL vulnerabilities found in the image.
+#
+# Required secrets:
+#   ANTHROPIC_API_KEY  — Anthropic API key
+#   VCS_TOKEN          — GitHub PAT with repo + pull_request scopes
+
+name: Trivy Auto-Remediation
+
+on:
+  # Trigger after the Trivy scan workflow completes
+  workflow_run:
+    workflows: ["Trivy Security Scan"]   # <-- change to your scan workflow name
+    types: [completed]
+    branches: [main, master]
+
+  # Also allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      image_ref:
+        description: "Docker image to scan (e.g. myapp:latest)"
+        required: true
+        default: "myapp:latest"
+      severity:
+        description: "Minimum severity to remediate"
+        required: false
+        default: "HIGH"
+        type: choice
+        options: [CRITICAL, HIGH, MEDIUM]
+
+env:
+  IMAGE_REF: ${{ github.event.inputs.image_ref || 'myapp:latest' }}
+  MIN_SEVERITY: ${{ github.event.inputs.severity || 'HIGH' }}
+
+jobs:
+  trivy-scan-and-remediate:
+    name: Scan & Auto-Remediate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so we can create branches
+
+      # ── Build the image ────────────────────────────────────────────
+      - name: Build Docker image
+        run: docker build -t ${{ env.IMAGE_REF }} .
+
+      # ── Trivy scan ─────────────────────────────────────────────────
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_REF }}
+          format: json
+          output: trivy-report.json
+          severity: ${{ env.MIN_SEVERITY }},CRITICAL
+          exit-code: 0   # don't fail the pipeline here; let the agent decide
+
+      - name: Upload Trivy report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-report.json
+          retention-days: 7
+
+      # ── Auto-remediation ───────────────────────────────────────────
+      - name: Run trivy-remediation-agent
+        uses: docker://ghcr.io/your-org/trivy-remediation-agent:latest
+        # Alternatively, build and run from source:
+        # run: |
+        #   pip install -r trivy-remediation-agent/requirements.txt
+        #   python -m src.main \
+        #     --report trivy-report.json \
+        #     --repo . \
+        #     --severity ${{ env.MIN_SEVERITY }}
+        with:
+          args: >
+            --report /github/workspace/trivy-report.json
+            --repo /github/workspace
+            --severity ${{ env.MIN_SEVERITY }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          VCS_TOKEN: ${{ secrets.VCS_TOKEN }}
+          # Tell the agent which repo and provider to use
+          # (these can also live in config/config.yaml)
+
+      # ── Summary ────────────────────────────────────────────────────
+      - name: Print job summary
+        if: always()
+        run: |
+          echo "## Trivy Remediation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Image scanned: \`${{ env.IMAGE_REF }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "Minimum severity: \`${{ env.MIN_SEVERITY }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See the agent output above and the opened PR (if any) for details." >> $GITHUB_STEP_SUMMARY
