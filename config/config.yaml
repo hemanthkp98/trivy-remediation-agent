@@ -1,0 +1,48 @@
+# trivy-remediation-agent configuration
+# Copy this file and adjust for your environment.
+
+# Minimum severity level to remediate: CRITICAL, HIGH, MEDIUM, LOW
+min_severity: HIGH
+
+# When true, analyze and generate patches but skip git operations and PR creation
+dry_run: false
+
+# LLM settings
+llm:
+  model: claude-opus-4-6
+  max_tokens: 8192
+
+# Git commit settings
+git:
+  branch_prefix: fix/trivy-remediation
+  commit_message: "fix: auto-remediate vulnerabilities found by Trivy scan"
+  author_name: "Trivy Remediation Bot"
+  author_email: "trivy-bot@noreply.local"
+
+# VCS provider settings for PR/MR creation
+vcs:
+  # Provider: github or gitlab
+  provider: github
+
+  # Name of the env var holding your VCS token
+  token_env: VCS_TOKEN
+
+  # GitHub: "owner/repo"  |  GitLab: numeric project ID or "namespace/project"
+  repo: ""
+
+  # Base branch to target with the PR/MR
+  base_branch: main
+
+  # PR/MR title — {count} is replaced with the number of fixed CVEs
+  pr_title: "fix: auto-remediate {count} Trivy vulnerabilities"
+
+  # GitLab only — override if self-hosted
+  gitlab_url: "https://gitlab.com"
+
+  # Automatically merge the PR/MR after creation (requires appropriate permissions)
+  auto_merge: false
+
+# Notifications (all optional)
+notifications:
+  # Post a Slack message when a PR is opened
+  slack_webhook_env: SLACK_WEBHOOK_URL
