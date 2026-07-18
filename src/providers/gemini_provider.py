@@ -16,7 +16,7 @@ import os
 
 from .base import BaseLLMProvider
 
-DEFAULT_MODEL = "gemini-2.5-pro"
+DEFAULT_MODEL = "gemini-2.5-flash"
 
 
 class GeminiProvider(BaseLLMProvider):
@@ -40,7 +40,9 @@ class GeminiProvider(BaseLLMProvider):
             )
 
         llm_cfg = config.get("llm", {})
-        self._model = llm_cfg.get("model", DEFAULT_MODEL)
+        model = llm_cfg.get("model", DEFAULT_MODEL)
+        # The google-genai SDK requires the "models/" prefix
+        self._model = model if model.startswith("models/") else f"models/{model}"
         self._client = genai.Client(api_key=api_key)
         self._genai_types = genai_types
 
