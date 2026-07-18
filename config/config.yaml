@@ -9,8 +9,16 @@ dry_run: false
 
 # LLM settings
 llm:
-  model: claude-opus-4-6
+  # Provider: claude | gemini
+  # claude requires ANTHROPIC_API_KEY
+  # gemini requires GEMINI_API_KEY
+  provider: gemini
+  model: gemini-2.5-pro
   max_tokens: 8192
+
+  # To switch back to Claude, comment the lines above and uncomment below:
+  # provider: claude
+  # model: claude-opus-4-6
 
 # Git commit settings
 git:
