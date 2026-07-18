@@ -1,20 +1,24 @@
 """
-LLM-powered vulnerability analysis using Claude (claude-opus-4-6).
+LLM-powered vulnerability analysis.
 
-Sends grouped vulnerability data + relevant repo file contents to Claude,
-which returns a structured remediation plan specifying exact file changes.
+Sends grouped vulnerability data + relevant repo file contents to the
+configured LLM provider, which returns a structured remediation plan
+specifying exact file changes.
+
+Supported providers: ``claude`` (default), ``gemini``.
+Configure via ``config["llm"]["provider"]`` or the ``--provider`` CLI flag.
 """
 from __future__ import annotations
 
 import json
-import os
+import re
 from pathlib import Path
 from typing import Optional
 
-import anthropic
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .report_parser import Vulnerability, VulnerabilityReport
+from .providers import get_provider, BaseLLMProvider
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +144,7 @@ def discover_repo_files(repo_path: Path, target_types: set[str]) -> dict[str, st
 
 
 # ---------------------------------------------------------------------------
-# Analyzer
+# Prompts
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
@@ -163,16 +167,50 @@ Guidelines:
 - Consolidate changes: if multiple CVEs in the same package are fixed by one version bump,
   emit a single FileChange listing all CVE IDs.
 - Do not modify files that are not shown in the "Repository Files" section.
+
+IMPORTANT: You MUST respond with a single valid JSON object matching this exact schema:
+{
+  "changes": [
+    {
+      "file_path": "string",
+      "search": "string",
+      "replacement": "string",
+      "cves": ["string"],
+      "reasoning": "string"
+    }
+  ],
+  "unfixable": [
+    {
+      "cve_id": "string",
+      "package": "string",
+      "severity": "string",
+      "reason": "string",
+      "workaround": "string or null"
+    }
+  ],
+  "summary": "string"
+}
+Do not include any prose, markdown fences, or explanation outside the JSON object.
 """
 
 
-class LLMAnalyzer:
-    """Analyze vulnerabilities with Claude and return a structured remediation plan."""
+# ---------------------------------------------------------------------------
+# Analyzer
+# ---------------------------------------------------------------------------
 
-    def __init__(self, config: dict):
-        self.client = anthropic.Anthropic()
+class LLMAnalyzer:
+    """
+    Analyze vulnerabilities using the configured LLM provider and return
+    a structured RemediationPlan.
+
+    The provider (Claude or Gemini) is selected from ``config["llm"]["provider"]``
+    or overridden via the ``--provider`` CLI flag which injects it into config
+    before this class is instantiated.
+    """
+
+    def __init__(self, config: dict) -> None:
+        self.provider: BaseLLMProvider = get_provider(config)
         llm_cfg = config.get("llm", {})
-        self.model = llm_cfg.get("model", "claude-opus-4-6")
         self.max_tokens = int(llm_cfg.get("max_tokens", 8192))
 
     def analyze(
@@ -182,27 +220,16 @@ class LLMAnalyzer:
         repo_path: Path,
     ) -> RemediationPlan:
         """
-        Send vulnerabilities and relevant file contents to Claude.
-        Returns a validated RemediationPlan.
+        Build the prompt, call the LLM provider, parse the JSON response
+        into a validated RemediationPlan, and return it.
         """
         target_types = {v.target_type for v in filtered_vulns}
         file_contents = discover_repo_files(repo_path, target_types)
         grouped = report.group_by_target(filtered_vulns)
         prompt = self._build_prompt(report.artifact_name, grouped, file_contents)
 
-        response = self.client.messages.parse(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            thinking={"type": "adaptive"},
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-            output_format=RemediationPlan,
-        )
-
-        plan: RemediationPlan = response.parsed_output
-        if plan is None:
-            raise RuntimeError("LLM returned an empty or unparseable remediation plan.")
-
+        raw_text = self.provider.complete(SYSTEM_PROMPT, prompt, self.max_tokens)
+        plan = self._parse_response(raw_text)
         return plan
 
     # ------------------------------------------------------------------
@@ -216,7 +243,7 @@ class LLMAnalyzer:
         file_contents: dict[str, str],
     ) -> str:
         lines: list[str] = [
-            f"# Vulnerability Remediation Request",
+            "# Vulnerability Remediation Request",
             f"\nImage / artifact: **{artifact_name}**\n",
             "## Vulnerabilities to Fix\n",
         ]
@@ -256,3 +283,40 @@ class LLMAnalyzer:
         )
 
         return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Response parsing
+    # ------------------------------------------------------------------
+
+    def _parse_response(self, raw_text: str) -> RemediationPlan:
+        """
+        Extract JSON from the LLM response and validate it into a
+        RemediationPlan.  Handles optional markdown code fences.
+        """
+        text = raw_text.strip()
+
+        # Strip optional ```json ... ``` fences
+        fence_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+        if fence_match:
+            text = fence_match.group(1)
+        else:
+            # Find the outermost JSON object
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            if start != -1 and end > start:
+                text = text[start:end]
+
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"LLM returned invalid JSON.\nError: {exc}\nRaw response:\n{raw_text[:500]}"
+            ) from exc
+
+        try:
+            return RemediationPlan(**data)
+        except ValidationError as exc:
+            raise RuntimeError(
+                f"LLM response did not match the RemediationPlan schema.\n"
+                f"Validation errors: {exc}\nParsed data: {data}"
+            ) from exc

@@ -5,6 +5,10 @@ Usage:
   python -m src.main --report trivy-report.json --repo /path/to/repo
 
 Run `python -m src.main --help` for all options.
+
+Supported LLM providers:
+  claude  — Anthropic Claude (requires ANTHROPIC_API_KEY)
+  gemini  — Google Gemini   (requires GEMINI_API_KEY)
 """
 from __future__ import annotations
 
@@ -59,12 +63,19 @@ def load_config(config_path: str | Path) -> dict:
     help="Override the minimum severity from config (default: HIGH).",
 )
 @click.option(
+    "--provider", "-p",
+    default=None,
+    type=click.Choice(["claude", "gemini"], case_sensitive=False),
+    help="LLM provider to use (overrides config). 'claude' requires ANTHROPIC_API_KEY; "
+         "'gemini' requires GEMINI_API_KEY.",
+)
+@click.option(
     "--dry-run", "-n",
     is_flag=True,
     default=False,
     help="Analyze and patch files locally but skip git operations and PR creation.",
 )
-def main(report: str, repo: str, config: str, severity: str | None, dry_run: bool) -> None:
+def main(report: str, repo: str, config: str, severity: str | None, provider: str | None, dry_run: bool) -> None:
     """
     Automatically remediate vulnerabilities found by Trivy.
 
@@ -76,14 +87,21 @@ def main(report: str, repo: str, config: str, severity: str | None, dry_run: boo
     if severity:
         cfg["min_severity"] = severity.upper()
 
+    if provider:
+        cfg.setdefault("llm", {})["provider"] = provider.lower()
+
     if dry_run:
         cfg["dry_run"] = True
 
+    active_provider = cfg.get("llm", {}).get("provider", "claude")
+    active_model = cfg.get("llm", {}).get("model", "(default)")
+
     console.rule("[bold blue]trivy-remediation-agent")
-    console.print(f"  Report : {report}")
-    console.print(f"  Repo   : {repo}")
-    console.print(f"  Severity threshold : {cfg.get('min_severity', 'HIGH')}")
-    console.print(f"  Dry run : {cfg.get('dry_run', False)}\n")
+    console.print(f"  Report   : {report}")
+    console.print(f"  Repo     : {repo}")
+    console.print(f"  Provider : [bold cyan]{active_provider}[/bold cyan]  model={active_model}")
+    console.print(f"  Severity : {cfg.get('min_severity', 'HIGH')}")
+    console.print(f"  Dry run  : {cfg.get('dry_run', False)}\n")
 
     orchestrator = Orchestrator(cfg, repo_path=repo, dry_run=cfg.get("dry_run", False))
 
