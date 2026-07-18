@@ -13,7 +13,7 @@ llm:
   # claude requires ANTHROPIC_API_KEY
   # gemini requires GEMINI_API_KEY
   provider: gemini
-  model: gemini-2.5-pro
+  model: gemini-2.5-flash
   max_tokens: 8192
 
   # To switch back to Claude, comment the lines above and uncomment below:
