@@ -3,6 +3,7 @@ Apply file changes produced by the LLM to the repository on disk.
 """
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -55,10 +56,10 @@ class Patcher:
                     result.applied.append(rel)
             else:
                 result.skipped.append({
-                    "file": change.file_path,
-                    "cves": change.cves,
-                    "reason": outcome,
-                    "search_snippet": change.search[:120],
+                     "file": change.file_path,
+                     "cves": change.cves,
+                     "reason": outcome,
+                     "search_snippet": change.search[:120],
                 })
 
         return result
@@ -87,10 +88,36 @@ class Patcher:
         search_text = change.search.replace("\\n", "\n")
         replacement_text = change.replacement.replace("\\n", "\n")
 
-        if search_text not in original:
-            # Try a whitespace-normalised match as a fallback
+        # Try exact match first
+        patched_text = None
+        if search_text in original:
+            patched_text = original.replace(search_text, replacement_text, 1)
+        else:
+            # Fall back to whitespace-resilient match
+            parts = re.split(r"(\s+)", search_text)
+            regex_parts = []
+            for part in parts:
+                if not part:
+                    continue
+                if re.match(r"^\s+$", part):
+                    # Support standard whitespace AND line continuations (backslash + newline)
+                    regex_parts.append(r"(?:\\\s*\n|\s)+")
+                else:
+                    regex_parts.append(re.escape(part))
+            pattern = "".join(regex_parts)
+
+            try:
+                rx = re.compile(pattern, re.DOTALL)
+                match = rx.search(original)
+                if match:
+                    start, end = match.span()
+                    patched_text = original[:start] + replacement_text + original[end:]
+            except Exception as e:
+                return f"Regex search error: {e}"
+
+        if patched_text is None:
             return (
-                f"Search text not found in {file_path.name}. "
+                f"Search text not found in {file_path.name} (even with whitespace-resilient matching). "
                 f"Expected to find: {repr(search_text[:80])}"
             )
 
@@ -98,8 +125,7 @@ class Patcher:
         backup = file_path.with_suffix(file_path.suffix + self.BACKUP_SUFFIX)
         shutil.copy2(file_path, backup)
 
-        patched = original.replace(search_text, replacement_text, 1)
-        file_path.write_text(patched)
+        file_path.write_text(patched_text)
         return None
 
     def restore_backups(self) -> None:

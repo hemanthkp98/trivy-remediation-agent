@@ -75,7 +75,27 @@ def load_config(config_path: str | Path) -> dict:
     default=False,
     help="Analyze and patch files locally but skip git operations and PR creation.",
 )
-def main(report: str, repo: str, config: str, severity: str | None, provider: str | None, dry_run: bool) -> None:
+@click.option(
+    "--verify-command", "-v",
+    default=None,
+    help="Command to verify code correctness (e.g. 'pytest'). Override config setting.",
+)
+@click.option(
+    "--max-retries",
+    default=None,
+    type=int,
+    help="Max verification self-healing retries. Override config setting.",
+)
+def main(
+    report: str,
+    repo: str,
+    config: str,
+    severity: str | None,
+    provider: str | None,
+    dry_run: bool,
+    verify_command: str | None,
+    max_retries: int | None,
+) -> None:
     """
     Automatically remediate vulnerabilities found by Trivy.
 
@@ -93,6 +113,12 @@ def main(report: str, repo: str, config: str, severity: str | None, provider: st
     if dry_run:
         cfg["dry_run"] = True
 
+    if verify_command is not None:
+        cfg.setdefault("verification", {})["command"] = verify_command
+
+    if max_retries is not None:
+        cfg.setdefault("verification", {})["max_retries"] = max_retries
+
     active_provider = cfg.get("llm", {}).get("provider", "claude")
     active_model = cfg.get("llm", {}).get("model", "(default)")
 
@@ -101,7 +127,11 @@ def main(report: str, repo: str, config: str, severity: str | None, provider: st
     console.print(f"  Repo     : {repo}")
     console.print(f"  Provider : [bold cyan]{active_provider}[/bold cyan]  model={active_model}")
     console.print(f"  Severity : {cfg.get('min_severity', 'HIGH')}")
-    console.print(f"  Dry run  : {cfg.get('dry_run', False)}\n")
+    console.print(f"  Dry run  : {cfg.get('dry_run', False)}")
+    if cfg.get("verification", {}).get("command"):
+        console.print(f"  Verify   : {cfg['verification']['command']} (max_retries={cfg['verification'].get('max_retries', 3)})\n")
+    else:
+        console.print("  Verify   : Disabled\n")
 
     orchestrator = Orchestrator(cfg, repo_path=repo, dry_run=cfg.get("dry_run", False))
 

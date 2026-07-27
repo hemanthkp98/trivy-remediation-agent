@@ -54,3 +54,12 @@ vcs:
 notifications:
   # Post a Slack message when a PR is opened
   slack_webhook_env: SLACK_WEBHOOK_URL
+
+# Verification and Self-Healing settings (all optional)
+verification:
+  # Command to run after applying patches to verify correctness (e.g. "pytest", "pip check", "npm run build")
+  # If empty, verification is skipped
+  command: ""
+  # Max number of LLM self-correction retry attempts if verification fails
+  max_retries: 3
+

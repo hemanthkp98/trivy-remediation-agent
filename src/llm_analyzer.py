@@ -232,6 +232,44 @@ class LLMAnalyzer:
         plan = self._parse_response(raw_text)
         return plan
 
+    def analyze_correction(
+        self,
+        report: VulnerabilityReport,
+        filtered_vulns: list[Vulnerability],
+        repo_path: Path,
+        previous_plan: RemediationPlan,
+        error_message: str,
+    ) -> RemediationPlan:
+        """
+        Ask the LLM provider to correct the previous plan because verification failed.
+        """
+        target_types = {v.target_type for v in filtered_vulns}
+        file_contents = discover_repo_files(repo_path, target_types)
+        grouped = report.group_by_target(filtered_vulns)
+        base_prompt = self._build_prompt(report.artifact_name, grouped, file_contents)
+
+        previous_plan_json = previous_plan.model_dump_json(indent=2)
+
+        correction_prompt = (
+            f"{base_prompt}\n\n"
+            f"## Previous Attempt\n"
+            f"We applied the following proposed RemediationPlan:\n"
+            f"```json\n{previous_plan_json}\n```\n\n"
+            f"## Verification Failure\n"
+            f"Applying the above plan failed verification with the following error:\n"
+            f"```\n{error_message}\n```\n\n"
+            f"## Task\n"
+            f"Please correct the RemediationPlan to resolve this error. You may need to:\n"
+            f"1. Choose a different version for the package (e.g., if there's a dependency conflict or if the fixed version is unavailable).\n"
+            f"2. Correct the search/replacement strings (e.g., if there was a typo or mismatch).\n"
+            f"3. Ensure the replacement maintains valid code/config syntax.\n\n"
+            f"Return a complete, corrected RemediationPlan JSON matching the schema."
+        )
+
+        raw_text = self.provider.complete(SYSTEM_PROMPT, correction_prompt, self.max_tokens)
+        plan = self._parse_response(raw_text)
+        return plan
+
     # ------------------------------------------------------------------
     # Prompt construction
     # ------------------------------------------------------------------

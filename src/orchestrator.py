@@ -81,6 +81,69 @@ class Orchestrator:
         patcher = Patcher(self.repo_path)
         patch_result: PatchResult = patcher.apply(plan)
 
+        # ── 4.5 Verification and Self-Healing Loop ─────────────────────
+        verify_cmd = self.config.get("verification", {}).get("command", "")
+        if verify_cmd and patch_result.applied:
+            console.rule("[bold cyan]Step 3.5: Verifying patches")
+            success, err_output = self._run_verification(verify_cmd)
+            
+            if success:
+                console.print("  [green]Verification succeeded![/green]")
+            else:
+                console.print(f"  [red]Verification failed.[/red]")
+                
+                # Self-healing loop
+                retry_count = 0
+                max_retries = int(self.config.get("verification", {}).get("max_retries", 3))
+                while not success and retry_count < max_retries:
+                    retry_count += 1
+                    console.print(f"\n[bold yellow]Self-Healing Attempt {retry_count}/{max_retries}[/bold yellow]...")
+                    
+                    # 1. Restore backups to clear the broken changes
+                    patcher.restore_backups()
+                    
+                    # 2. Query LLM for corrected patches using the error feedback
+                    console.print("  Querying LLM with verification error feedback...")
+                    try:
+                        plan = analyzer.analyze_correction(
+                            report, filtered, self.repo_path, plan, err_output
+                        )
+                    except Exception as exc:
+                        console.print(f"  [red]LLM query failed:[/red] {exc}")
+                        break
+                    
+                    console.print(f"  [green]New plan received[/green]: {len(plan.changes)} change(s)")
+                    if not plan.changes:
+                        console.print("  [yellow]No patches returned in the corrected plan. Aborting self-healing.[/yellow]")
+                        break
+                    
+                    # 3. Apply the new plan
+                    patch_result = patcher.apply(plan)
+                    if not patch_result.applied:
+                        console.print("  [yellow]No patches could be applied in the corrected plan. Aborting self-healing.[/yellow]")
+                        break
+                    
+                    # 4. Re-run verification
+                    success, err_output = self._run_verification(verify_cmd)
+                    if success:
+                        console.print("  [green]Verification succeeded after self-healing![/green]")
+                        break
+                    else:
+                        console.print(f"  [red]Verification failed again.[/red]")
+                
+                # If all retries failed, restore backups and abort
+                if not success:
+                    console.print("\n[bold red]Self-healing failed to resolve the verification errors. Restoring original repository files and aborting.[/bold red]")
+                    patcher.restore_backups()
+                    return {
+                        "pr_url": None,
+                        "cves_fixed": [],
+                        "cves_skipped": [],
+                        "dry_run": self.dry_run,
+                        "verification_failed": True,
+                        "error_log": err_output
+                    }
+
         cves_fixed = [
             cve
             for change in plan.changes
@@ -255,3 +318,24 @@ class Orchestrator:
             req.post(webhook, json=payload, timeout=10)
         except Exception:
             pass  # Slack notification is best-effort
+
+    def _run_verification(self, command: str) -> tuple[bool, str]:
+        """Run verification command. Returns (success_bool, output_str)."""
+        import subprocess
+        console.print(f"  Running verification command: [bold]{command}[/bold]")
+        try:
+            res = subprocess.run(
+                command,
+                shell=True,
+                cwd=self.repo_path,
+                capture_output=True,
+                text=True,
+                timeout=180,  # 3 minutes limit
+            )
+            output = f"Exit code: {res.returncode}\n\nSTDOUT:\n{res.stdout}\n\nSTDERR:\n{res.stderr}"
+            success = (res.returncode == 0)
+            return success, output
+        except subprocess.TimeoutExpired:
+            return False, "Verification command timed out after 180 seconds."
+        except Exception as e:
+            return False, f"Failed to execute verification command: {e}"
