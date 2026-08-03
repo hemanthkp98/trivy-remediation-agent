@@ -63,3 +63,15 @@ verification:
   # Max number of LLM self-correction retry attempts if verification fails
   max_retries: 3
 
+# History and Reporting settings
+history:
+  # Whether to record run history to the VCS branch after each run
+  enabled: true
+  # Branch name where history.jsonl and latest-report.html are stored
+  branch: "trivy-bot/history"
+  # Optional local file path for local history recording
+  path: ""
+  # Set to true to embed Chart.js inline (for air-gapped environments)
+  inline_chartjs: false
+
+

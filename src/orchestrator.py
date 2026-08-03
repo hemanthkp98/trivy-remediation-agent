@@ -4,7 +4,9 @@ Main orchestration logic — ties together parsing, analysis, patching, and git.
 from __future__ import annotations
 
 import os
+import uuid
 import textwrap
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +18,7 @@ from .git_handler import GitHandler
 from .llm_analyzer import LLMAnalyzer, RemediationPlan
 from .patcher import PatchResult, Patcher
 from .report_parser import ReportParser, VulnerabilityReport
+from .history import RunRecord, HistoryManager
 
 console = Console()
 
@@ -159,20 +162,44 @@ class Orchestrator:
             for skip in patch_result.skipped:
                 console.print(f"    - {skip['file']}: {skip['reason']}")
 
+        # Prepare history record helper
+        unfixable_cves = [u.cve_id for u in plan.unfixable] if plan.unfixable else []
+        cves_skipped_flat = [c for skip in patch_result.skipped for c in (skip["cves"] if isinstance(skip["cves"], list) else [skip["cves"]])]
+
+        def _record_history(pr_url: Optional[str] = None) -> RunRecord:
+            rec = RunRecord(
+                run_id=str(uuid.uuid4()),
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                artifact_name=report.artifact_name,
+                provider=self.config.get("llm", {}).get("provider", "claude"),
+                severity_threshold=self.min_severity,
+                cves_fixed=cves_fixed,
+                cves_skipped=cves_skipped_flat,
+                unfixable_cves=unfixable_cves,
+                pr_url=pr_url,
+                dry_run=self.dry_run,
+                verification_passed=True if verify_cmd else None,
+            )
+            HistoryManager(self.config).append(rec)
+            return rec
+
         if self.dry_run:
             console.rule("[bold yellow]DRY RUN — no git operations performed")
             patcher.restore_backups()
+            rec = _record_history(pr_url=None)
             return {
                 "pr_url": None,
                 "cves_fixed": cves_fixed,
                 "cves_skipped": cves_skipped,
                 "dry_run": True,
                 "changes": [c.model_dump() for c in plan.changes],
+                "run_record": rec,
             }
 
         if not patch_result.applied:
             console.print("[red]No patches were successfully applied. Nothing to commit.[/red]")
-            return {"pr_url": None, "cves_fixed": [], "cves_skipped": cves_skipped, "dry_run": False}
+            rec = _record_history(pr_url=None)
+            return {"pr_url": None, "cves_fixed": [], "cves_skipped": cves_skipped, "dry_run": False, "run_record": rec}
 
         # ── 5. Git operations ───────────────────────────────────────────
         console.rule("[bold cyan]Step 4: Git — commit & push")
@@ -198,11 +225,14 @@ class Orchestrator:
 
         self._maybe_notify_slack(pr_url, pr_title, cves_fixed)
 
+        rec = _record_history(pr_url=pr_url)
+
         return {
             "pr_url": pr_url,
             "cves_fixed": cves_fixed,
             "cves_skipped": cves_skipped,
             "dry_run": False,
+            "run_record": rec,
         }
 
     # ------------------------------------------------------------------

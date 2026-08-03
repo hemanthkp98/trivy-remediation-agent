@@ -174,31 +174,60 @@ Options:
 
 ---
 
-## CI/CD Integration
+## Setting Up Your VCS Token (GitHub / GitLab PAT)
 
-Ready-to-use pipeline snippets are in the `ci/` directory:
+The `VCS_TOKEN` environment variable provides the credentials required to push remediation branches, open Pull/Merge Requests, and maintain history records.
 
-| File | Platform |
-|------|----------|
-| `ci/github-actions.yml` | GitHub Actions |
-| `ci/gitlab-ci.yml` | GitLab CI |
-| `ci/Jenkinsfile` | Jenkins |
+### GitHub PAT Provisioning
 
-### GitHub Actions (minimal)
+We recommend creating a **Fine-grained Personal Access Token (PAT)** for enhanced security:
 
-```yaml
-# In your existing workflow, add after the Trivy scan step:
-- name: Auto-remediate vulnerabilities
-  run: |
-    pip install -r trivy-remediation-agent/requirements.txt
-    python -m src.main \
-      --report trivy-report.json \
-      --repo . \
-      --provider gemini \
-      --severity HIGH
-  env:
-    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-    VCS_TOKEN: ${{ secrets.VCS_TOKEN }}
+1. Go to **Settings** → **Developer settings** → **Personal access tokens** → **Fine-grained tokens**.
+2. Click **Generate new token**.
+3. Select your target **Repository access** ("Only select repositories" → choose your app repository).
+4. Set the following **Repository permissions**:
+   - **Contents**: `Read and write` (to push branches and write history logs)
+   - **Pull requests**: `Read and write` (to open remediation PRs)
+5. Copy the generated token and export it as `VCS_TOKEN`.
+
+*Note: If using Classic PATs, select the `repo` scope.*
+
+### GitLab Token Provisioning
+
+1. Go to **User Settings** → **Access Tokens** (or Project Access Tokens).
+2. Name: `trivy-remediation-agent`.
+3. Select scopes: **`api`** and **`write_repository`**.
+4. Copy the token and export it as `VCS_TOKEN`.
+
+### Storing the Token in CI/CD
+
+- **GitHub Actions**: Add as a repository secret (`Settings` → `Secrets` → `Actions` → `VCS_TOKEN`).
+- **GitLab CI**: Add as a masked CI/CD variable (`Settings` → `CI/CD` → `Variables`).
+
+---
+
+## History & Trend Dashboard Reporting
+
+`trivy-remediation-agent` maintains an automated run history on a dedicated orphan branch (`trivy-bot/history`) via VCS REST API calls, avoiding ephemeral runner data loss in CI/CD pipelines.
+
+### Generating HTML Trend Dashboards
+
+You can generate interactive, self-contained HTML dashboards showing CVE trends, recurring regressions, MTTR (Mean Time To Remediate), and execution logs:
+
+```bash
+# Generate dashboard from recorded history
+python -m src.main scan-report --output report.html --open
+
+# Limit to the last 10 runs and push the dashboard back to the history branch
+python -m src.main scan-report --last 10 --push
+```
+
+### Single-Run HTML Summary
+
+To generate a standalone HTML report artifact for a single remediation run (useful for CI artifact upload step):
+
+```bash
+python -m src.main remediate --report trivy-report.json --repo . --output summary.html
 ```
 
 ---
@@ -208,12 +237,14 @@ Ready-to-use pipeline snippets are in the `ci/` directory:
 ```
 trivy-remediation-agent/
 ├── src/
-│   ├── main.py              CLI (Click) — entry point
+│   ├── main.py              CLI (Click) — entry point (remediate & scan-report)
 │   ├── orchestrator.py      Pipeline coordinator
 │   ├── report_parser.py     Trivy JSON v2 parser → typed Vulnerability objects
 │   ├── llm_analyzer.py      Provider-agnostic analyzer — returns a RemediationPlan
 │   ├── patcher.py           Applies search→replace patches to files on disk
 │   ├── git_handler.py       Branch, commit, push, open PR/MR
+│   ├── history.py           Run record tracking & VCS branch persistence
+│   ├── reporter.py          HTML trend dashboard generator
 │   └── providers/
 │       ├── __init__.py      get_provider(config) factory
 │       ├── base.py          BaseLLMProvider abstract interface
@@ -223,8 +254,12 @@ trivy-remediation-agent/
 │   └── config.yaml          Default configuration
 ├── ci/                      Ready-to-use pipeline snippets
 ├── tests/
-│   └── fixtures/
-│       └── sample_trivy_report.json
+│   ├── fixtures/
+│   │   └── sample_trivy_report.json
+│   ├── test_history.py
+│   ├── test_patcher_resilience.py
+│   ├── test_reporter.py
+│   └── test_verification_loop.py
 ├── Dockerfile               Containerised agent runner
 └── requirements.txt
 ```
@@ -283,3 +318,4 @@ The `Patcher` applies these as exact string replacements. A `.trivy-backup` file
 ## License
 
 MIT
+
