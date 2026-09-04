@@ -1,4 +1,5 @@
 # AI assistant & agent config directories
+CLAUDE.md
 .claude/
 .agents/
 .gemini/
