@@ -185,29 +185,32 @@ class BaseImageResolver:
         version, variant = _split_tag(ref.tag)
 
         if version:
-            family_key: tuple[str, str] | None = None
-            candidate_map = self.patch_candidates
+            major = version.split(".")[0]
+            family_keys: list[tuple[str, str]]
             if self.strategy == "minor":
                 candidate_map = self.minor_candidates
-                family_key = (image, version.split(".")[0])
+                family_keys = [(image, major)]
             else:
+                candidate_map = self.patch_candidates
                 family = _minor_family(version)
-                if family:
-                    family_key = (image, family)
+                family_keys = [(image, family)] if family else []
+                family_keys.append((image, major))
 
-            if family_key:
-                candidate_version = candidate_map.get(family_key)
-                if candidate_version and _is_newer(candidate_version, version):
-                    new_tag = f"{candidate_version}{variant}"
-                    return UpgradeCandidate(
-                        old_tag=ref.tag,
-                        new_tag=new_tag,
-                        strategy="patch",
-                        reasoning=(
-                            f"Upgrade {ref.image} base image tag from {ref.tag} to "
-                            f"{new_tag} to pick up upstream OS security patches."
-                        ),
-                    )
+            candidate_version = next(
+                (candidate_map[key] for key in family_keys if key in candidate_map), None
+            )
+
+            if candidate_version and _is_newer(candidate_version, version):
+                new_tag = f"{candidate_version}{variant}"
+                return UpgradeCandidate(
+                    old_tag=ref.tag,
+                    new_tag=new_tag,
+                    strategy="patch",
+                    reasoning=(
+                        f"Upgrade {ref.image} base image tag from {ref.tag} to "
+                        f"{new_tag} to pick up upstream OS security patches."
+                    ),
+                )
 
         codename_match = self._match_codename(ref.tag)
         if codename_match:
