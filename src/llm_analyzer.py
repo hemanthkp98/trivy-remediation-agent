@@ -17,6 +17,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, ValidationError
 
+from .base_image import BaseImageParser, BaseImageResolver
 from .report_parser import Vulnerability, VulnerabilityReport
 from .providers import get_provider, BaseLLMProvider
 
@@ -153,9 +154,16 @@ Your job is to analyze Trivy vulnerability reports and produce precise, minimal 
 that upgrade affected packages to their fixed versions — without breaking the application.
 
 Guidelines:
-- For OS packages (debian/ubuntu/alpine/redhat): insert a RUN command immediately after
-  the relevant FROM line in the Dockerfile to install pinned, patched versions.
-  Example: RUN apt-get update && apt-get install -y --no-install-recommends libssl1.1=1.1.1w-0+deb11u1 && rm -rf /var/lib/apt/lists/*
+- For OS packages (debian/ubuntu/alpine/redhat): the ROOT-CAUSE fix is to upgrade the base
+  image tag rather than patch individual packages. Replace the outdated
+  `FROM <image>:<old_tag>` line with `FROM <image>:<new_tag>`, using the exact tag from the
+  "Base Image Context" section below when one is provided. This resolves the entire batch of
+  OS CVEs for that stage in a single, clean diff without bloating the image with extra layers.
+  Example: search="FROM python:3.9.12-slim", replacement="FROM python:3.9.21-slim"
+  Only fall back to a `RUN apt-get install` / `apk add` package pin as a SECONDARY measure,
+  for residual CVEs that remain unresolved after the base image upgrade, or when the Base
+  Image Context section indicates no safe upgrade candidate is available.
+  Fallback example: RUN apt-get update && apt-get install -y --no-install-recommends libssl1.1=1.1.1w-0+deb11u1 && rm -rf /var/lib/apt/lists/*
 - For pip packages: update the version constraint in requirements.txt (or equivalent).
   Prefer `>=fixed_version` unless the file already uses exact pinning, in which case
   use `==fixed_version`.
@@ -212,6 +220,11 @@ class LLMAnalyzer:
         self.provider: BaseLLMProvider = get_provider(config)
         llm_cfg = config.get("llm", {})
         self.max_tokens = int(llm_cfg.get("max_tokens", 8192))
+
+        base_image_cfg = config.get("base_image", {})
+        self.base_image_enabled = bool(base_image_cfg.get("enabled", True))
+        self.base_image_strategy = base_image_cfg.get("strategy", "patch")
+        self.base_image_fallback = bool(base_image_cfg.get("fallback_to_package_pin", True))
 
     def analyze(
         self,
@@ -298,6 +311,13 @@ class LLMAnalyzer:
                     lines.append(f"  *{v.title}*")
             lines.append("")
 
+        if self.base_image_enabled and "Dockerfile" in file_contents:
+            base_image_section = self._build_base_image_context(
+                file_contents["Dockerfile"], grouped
+            )
+            if base_image_section:
+                lines.append(base_image_section)
+
         if file_contents:
             lines.append("## Repository Files\n")
             for fpath, content in file_contents.items():
@@ -320,6 +340,68 @@ class LLMAnalyzer:
             "- `summary`: a brief human-readable summary of the changes\n"
         )
 
+        return "\n".join(lines)
+
+    def _build_base_image_context(self, dockerfile_content: str, grouped: dict) -> str:
+        """Build the "Base Image Context" prompt section with FROM refs and
+        recommended upgrade tags, correlated with detected os-pkgs CVEs."""
+        refs = BaseImageParser.parse(dockerfile_content)
+        if not refs:
+            return ""
+
+        resolver = BaseImageResolver(strategy=self.base_image_strategy)
+        os_targets = {target for (target, cls, _vtype) in grouped if cls == "os-pkgs"}
+
+        lines = ["## Base Image Context\n"]
+        any_entry = False
+        for ref in refs:
+            candidate = resolver.suggest(ref)
+            matched_target = next(
+                (t for t in os_targets if BaseImageParser.find_for_target(refs, t) is ref),
+                None,
+            )
+            if candidate is None and matched_target is None:
+                continue
+
+            any_entry = True
+            stage_label = f" (stage: `{ref.stage}`)" if ref.stage else ""
+            lines.append(f"- Dockerfile line `{ref.raw_line}`{stage_label}")
+            if candidate:
+                lines.append(
+                    f"  - Recommended upgrade: `FROM {ref.image}:{ref.tag}` -> "
+                    f"`FROM {ref.image}:{candidate.new_tag}`"
+                )
+                lines.append(f"  - Reasoning: {candidate.reasoning}")
+            elif self.base_image_fallback:
+                lines.append(
+                    "  - No safe offline upgrade candidate found; use targeted package "
+                    "pinning (RUN apt-get/apk) as a fallback for residual CVEs."
+                )
+            else:
+                lines.append(
+                    "  - No safe offline upgrade candidate found and package-pin fallback "
+                    "is disabled; list unresolved CVEs under `unfixable` instead."
+                )
+
+            if matched_target:
+                cves = [
+                    v.vuln_id
+                    for (target, cls, _vt), vulns in grouped.items()
+                    if target == matched_target and cls == "os-pkgs"
+                    for v in vulns
+                ]
+                if cves:
+                    lines.append(f"  - Target OS CVEs to resolve: {', '.join(cves)}")
+
+        if not any_entry:
+            return ""
+
+        lines.append(
+            "\nIMPORTANT: For the OS package CVEs above, prefer replacing the `FROM` line "
+            "with the recommended upgraded tag over adding `RUN apt-get`/`apk` package pins. "
+            "Only fall back to package pinning for CVEs that remain unresolved after the "
+            "base image upgrade.\n"
+        )
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
