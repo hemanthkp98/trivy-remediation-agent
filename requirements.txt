@@ -5,3 +5,4 @@ pyyaml>=6.0
 requests>=2.32.0
 click>=8.1.0
 rich>=13.0.0
+packaging>=23.0,<25.0

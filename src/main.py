@@ -100,6 +100,19 @@ def cli() -> None:
     type=click.Path(dir_okay=False),
     help="Path to write per-run HTML summary report.",
 )
+@click.option(
+    "--base-image-upgrade/--no-base-image-upgrade",
+    "base_image_upgrade",
+    default=None,
+    help="Enable/disable root-cause Dockerfile base image tag upgrades (overrides config; "
+    "default: true).",
+)
+@click.option(
+    "--base-image-strategy",
+    default=None,
+    type=click.Choice(["patch", "minor"], case_sensitive=False),
+    help="Base image upgrade strategy (overrides config; default: 'patch').",
+)
 def remediate(
     report: str,
     repo: str,
@@ -110,6 +123,8 @@ def remediate(
     verify_command: str | None,
     max_retries: int | None,
     output: str | None,
+    base_image_upgrade: bool | None,
+    base_image_strategy: str | None,
 ) -> None:
     """
     Automatically remediate vulnerabilities found by Trivy.
@@ -130,6 +145,12 @@ def remediate(
 
     if max_retries is not None:
         cfg.setdefault("verification", {})["max_retries"] = max_retries
+
+    if base_image_upgrade is not None:
+        cfg.setdefault("base_image", {})["enabled"] = base_image_upgrade
+
+    if base_image_strategy is not None:
+        cfg.setdefault("base_image", {})["strategy"] = base_image_strategy.lower()
 
     active_provider = cfg.get("llm", {}).get("provider", "claude")
     active_model = cfg.get("llm", {}).get("model", "(default)")

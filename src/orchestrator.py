@@ -4,6 +4,7 @@ Main orchestration logic — ties together parsing, analysis, patching, and git.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 import textwrap
 from datetime import datetime, timezone
@@ -21,6 +22,8 @@ from .report_parser import ReportParser, VulnerabilityReport
 from .history import RunRecord, HistoryManager
 
 console = Console()
+
+FROM_LINE_RE = re.compile(r"^\s*FROM\s+\S", re.IGNORECASE)
 
 
 class Orchestrator:
@@ -157,6 +160,11 @@ class Orchestrator:
 
         if patch_result.applied:
             console.print(f"  [green]Patched files[/green]: {', '.join(patch_result.applied)}")
+
+        base_image_upgrades = self._detect_base_image_upgrades(plan, patch_result)
+        if base_image_upgrades:
+            self._print_base_image_table(base_image_upgrades)
+
         if patch_result.skipped:
             console.print(f"  [yellow]Skipped changes[/yellow]:")
             for skip in patch_result.skipped:
@@ -216,7 +224,9 @@ class Orchestrator:
         # ── 6. Open PR/MR ───────────────────────────────────────────────
         console.rule("[bold cyan]Step 5: Opening Pull Request")
         pr_title = self._build_pr_title(len(cves_fixed))
-        pr_body = self._build_pr_body(plan, patch_result, report.artifact_name)
+        pr_body = self._build_pr_body(
+            plan, patch_result, report.artifact_name, base_image_upgrades
+        )
 
         pr_data = git.open_pull_request(branch, pr_title, pr_body)
         pr_url = pr_data.get("html_url") or pr_data.get("web_url") or "N/A"
@@ -262,6 +272,44 @@ class Orchestrator:
             )
         console.print(table)
 
+    def _detect_base_image_upgrades(
+        self, plan: RemediationPlan, patch_result: PatchResult
+    ) -> list[dict]:
+        """Identify applied FileChanges that upgraded a Dockerfile FROM line."""
+        upgrades: list[dict] = []
+        for change in plan.changes:
+            if change.file_path not in patch_result.applied:
+                continue
+            if FROM_LINE_RE.match(change.search) and FROM_LINE_RE.match(
+                change.replacement
+            ):
+                upgrades.append(
+                    {
+                        "file": change.file_path,
+                        "original": change.search.strip(),
+                        "upgraded": change.replacement.strip(),
+                        "cves": change.cves,
+                    }
+                )
+        return upgrades
+
+    def _print_base_image_table(self, upgrades: list[dict]) -> None:
+        table = Table(
+            title="🐳 Base Image Upgrades (root-cause remediation)", show_lines=True
+        )
+        table.add_column("File", style="bold")
+        table.add_column("Original Base Image")
+        table.add_column("Upgraded Base Image")
+        table.add_column("Target OS CVEs Resolved")
+        for upgrade in upgrades:
+            table.add_row(
+                upgrade["file"],
+                upgrade["original"],
+                upgrade["upgraded"],
+                ", ".join(upgrade["cves"]) or "-",
+            )
+        console.print(table)
+
     def _build_pr_title(self, count: int) -> str:
         template = self.config.get("vcs", {}).get(
             "pr_title", "fix: auto-remediate {count} Trivy vulnerabilities"
@@ -273,6 +321,7 @@ class Orchestrator:
         plan: RemediationPlan,
         patch_result: PatchResult,
         artifact_name: str,
+        base_image_upgrades: list[dict] | None = None,
     ) -> str:
         cves_in_plan = []
         for change in plan.changes:
@@ -287,6 +336,23 @@ class Orchestrator:
             "This PR was generated automatically by [trivy-remediation-agent](https://github.com/your-org/trivy-remediation-agent) "
             "after a Trivy vulnerability scan detected fixable CVEs.",
             "",
+        ]
+
+        if base_image_upgrades:
+            lines += [
+                "### 🐳 Base Image Upgrades",
+                "",
+                "| File | Original Base Image | Upgraded Base Image | Target OS CVEs Resolved |",
+                "|---|---|---|---|",
+            ]
+            for upgrade in base_image_upgrades:
+                lines.append(
+                    f"| `{upgrade['file']}` | `{upgrade['original']}` | "
+                    f"`{upgrade['upgraded']}` | {', '.join(upgrade['cves']) or '-'} |"
+                )
+            lines.append("")
+
+        lines += [
             "### Changes Made",
             "",
         ]

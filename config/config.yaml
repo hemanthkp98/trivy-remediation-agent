@@ -55,6 +55,16 @@ notifications:
   # Post a Slack message when a PR is opened
   slack_webhook_env: SLACK_WEBHOOK_URL
 
+# Base image upgrade settings (root-cause remediation for OS package CVEs)
+base_image:
+  # Detect outdated Dockerfile FROM lines and suggest safe tag upgrades
+  enabled: true
+  # Upgrade strategy: "patch" (same minor release family) | "minor"
+  strategy: "patch"
+  # Allow RUN apt-get/apk package pinning as a fallback when a base image bump
+  # doesn't fully resolve residual CVEs
+  fallback_to_package_pin: true
+
 # Verification and Self-Healing settings (all optional)
 verification:
   # Command to run after applying patches to verify correctness (e.g. "pytest", "pip check", "npm run build")
