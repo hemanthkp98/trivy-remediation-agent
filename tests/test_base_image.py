@@ -77,7 +77,9 @@ class TestBaseImageParser(unittest.TestCase):
 
     def test_find_for_target_exact_match(self):
         refs = BaseImageParser.parse("FROM python:3.9.12-slim\n")
-        found = BaseImageParser.find_for_target(refs, "python:3.9.12-slim (debian 11.6)")
+        found = BaseImageParser.find_for_target(
+            refs, "python:3.9.12-slim (debian 11.6)"
+        )
         self.assertIsNotNone(found)
         self.assertEqual(found.tag, "3.9.12-slim")
 
@@ -98,7 +100,9 @@ class TestBaseImageResolverPatchStrategy(unittest.TestCase):
         self.resolver = BaseImageResolver(strategy="patch")
 
     def test_python_patch_upgrade(self):
-        ref = BaseImageRef(raw_line="FROM python:3.9.12-slim", image="python", tag="3.9.12-slim")
+        ref = BaseImageRef(
+            raw_line="FROM python:3.9.12-slim", image="python", tag="3.9.12-slim"
+        )
         candidate = self.resolver.suggest(ref)
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate.new_tag, "3.9.21-slim")
@@ -119,23 +123,31 @@ class TestBaseImageResolverPatchStrategy(unittest.TestCase):
         self.assertEqual(candidate.new_tag, "3.17.10")
 
     def test_already_up_to_date_returns_none(self):
-        ref = BaseImageRef(raw_line="FROM python:3.9.21-slim", image="python", tag="3.9.21-slim")
+        ref = BaseImageRef(
+            raw_line="FROM python:3.9.21-slim", image="python", tag="3.9.21-slim"
+        )
         candidate = self.resolver.suggest(ref)
         self.assertIsNone(candidate)
 
     def test_newer_than_known_candidate_returns_none(self):
-        ref = BaseImageRef(raw_line="FROM python:3.9.99-slim", image="python", tag="3.9.99-slim")
+        ref = BaseImageRef(
+            raw_line="FROM python:3.9.99-slim", image="python", tag="3.9.99-slim"
+        )
         candidate = self.resolver.suggest(ref)
         self.assertIsNone(candidate)
 
     def test_unknown_image_returns_none(self):
-        ref = BaseImageRef(raw_line="FROM myco/custom:1.0.0", image="myco/custom", tag="1.0.0")
+        ref = BaseImageRef(
+            raw_line="FROM myco/custom:1.0.0", image="myco/custom", tag="1.0.0"
+        )
         candidate = self.resolver.suggest(ref)
         self.assertIsNone(candidate)
 
     def test_library_prefixed_image_normalized(self):
         ref = BaseImageRef(
-            raw_line="FROM library/python:3.9.12-slim", image="library/python", tag="3.9.12-slim"
+            raw_line="FROM library/python:3.9.12-slim",
+            image="library/python",
+            tag="3.9.12-slim",
         )
         candidate = self.resolver.suggest(ref)
         self.assertIsNotNone(candidate)
@@ -165,14 +177,18 @@ class TestBaseImageResolverPatchStrategy(unittest.TestCase):
 class TestBaseImageResolverMinorStrategy(unittest.TestCase):
     def test_minor_strategy_upgrade(self):
         resolver = BaseImageResolver(strategy="minor")
-        ref = BaseImageRef(raw_line="FROM python:3.9.12-slim", image="python", tag="3.9.12-slim")
+        ref = BaseImageRef(
+            raw_line="FROM python:3.9.12-slim", image="python", tag="3.9.12-slim"
+        )
         candidate = resolver.suggest(ref)
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate.new_tag, "3.12.8-slim")
 
     def test_minor_strategy_unknown_family_returns_none(self):
         resolver = BaseImageResolver(strategy="minor")
-        ref = BaseImageRef(raw_line="FROM node:16.20.2-alpine", image="node", tag="16.20.2-alpine")
+        ref = BaseImageRef(
+            raw_line="FROM node:16.20.2-alpine", image="node", tag="16.20.2-alpine"
+        )
         candidate = resolver.suggest(ref)
         self.assertIsNone(candidate)
 
@@ -196,7 +212,7 @@ class TestLLMAnalyzerBaseImageContext(unittest.TestCase):
         self.temp_dir = Path(tempfile.mkdtemp())
         self.dockerfile = self.temp_dir / "Dockerfile"
         self.dockerfile.write_text(
-            "FROM python:3.9.12-slim\n\nWORKDIR /app\nCOPY . .\nCMD [\"python\", \"app.py\"]\n"
+            'FROM python:3.9.12-slim\n\nWORKDIR /app\nCOPY . .\nCMD ["python", "app.py"]\n'
         )
 
     def tearDown(self):
@@ -205,13 +221,17 @@ class TestLLMAnalyzerBaseImageContext(unittest.TestCase):
     def _make_analyzer(self, base_image_cfg=None):
         config = {
             "llm": {"provider": "claude"},
-            "base_image": base_image_cfg if base_image_cfg is not None else {"enabled": True},
+            "base_image": base_image_cfg
+            if base_image_cfg is not None
+            else {"enabled": True},
         }
         analyzer = LLMAnalyzer.__new__(LLMAnalyzer)
         base_image_cfg = config.get("base_image", {})
         analyzer.base_image_enabled = bool(base_image_cfg.get("enabled", True))
         analyzer.base_image_strategy = base_image_cfg.get("strategy", "patch")
-        analyzer.base_image_fallback = bool(base_image_cfg.get("fallback_to_package_pin", True))
+        analyzer.base_image_fallback = bool(
+            base_image_cfg.get("fallback_to_package_pin", True)
+        )
         return analyzer
 
     def _grouped_os_vulns(self):
@@ -227,7 +247,9 @@ class TestLLMAnalyzerBaseImageContext(unittest.TestCase):
             target_class="os-pkgs",
             target_type="debian",
         )
-        report = VulnerabilityReport(artifact_name="myapp:latest", vulnerabilities=[vuln])
+        report = VulnerabilityReport(
+            artifact_name="myapp:latest", vulnerabilities=[vuln]
+        )
         return report.group_by_target([vuln])
 
     def test_prompt_includes_base_image_context_section(self):
@@ -304,9 +326,7 @@ class TestPatcherAppliesBaseImageUpgrade(unittest.TestCase):
 
     def test_search_and_replace_from_line(self):
         file_path = self.temp_dir / "Dockerfile"
-        file_path.write_text(
-            "FROM python:3.9.12-slim\n\nWORKDIR /app\nCOPY . .\n"
-        )
+        file_path.write_text("FROM python:3.9.12-slim\n\nWORKDIR /app\nCOPY . .\n")
 
         change = FileChange(
             file_path="Dockerfile",
@@ -343,7 +363,9 @@ class TestBaseImageDisabledFallback(unittest.TestCase):
         base_image_cfg = config.get("base_image", {})
         analyzer.base_image_enabled = bool(base_image_cfg.get("enabled", True))
         analyzer.base_image_strategy = base_image_cfg.get("strategy", "patch")
-        analyzer.base_image_fallback = bool(base_image_cfg.get("fallback_to_package_pin", True))
+        analyzer.base_image_fallback = bool(
+            base_image_cfg.get("fallback_to_package_pin", True)
+        )
 
         vuln = Vulnerability(
             vuln_id="CVE-2023-0001",

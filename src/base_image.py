@@ -197,7 +197,8 @@ class BaseImageResolver:
                 family_keys.append((image, major))
 
             candidate_version = next(
-                (candidate_map[key] for key in family_keys if key in candidate_map), None
+                (candidate_map[key] for key in family_keys if key in candidate_map),
+                None,
             )
 
             if candidate_version and _is_newer(candidate_version, version):
