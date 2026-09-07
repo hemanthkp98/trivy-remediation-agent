@@ -105,7 +105,7 @@ def cli() -> None:
     "base_image_upgrade",
     default=None,
     help="Enable/disable root-cause Dockerfile base image tag upgrades (overrides config; "
-         "default: true).",
+    "default: true).",
 )
 @click.option(
     "--base-image-strategy",

@@ -224,7 +224,9 @@ class Orchestrator:
         # ── 6. Open PR/MR ───────────────────────────────────────────────
         console.rule("[bold cyan]Step 5: Opening Pull Request")
         pr_title = self._build_pr_title(len(cves_fixed))
-        pr_body = self._build_pr_body(plan, patch_result, report.artifact_name, base_image_upgrades)
+        pr_body = self._build_pr_body(
+            plan, patch_result, report.artifact_name, base_image_upgrades
+        )
 
         pr_data = git.open_pull_request(branch, pr_title, pr_body)
         pr_url = pr_data.get("html_url") or pr_data.get("web_url") or "N/A"
@@ -278,7 +280,9 @@ class Orchestrator:
         for change in plan.changes:
             if change.file_path not in patch_result.applied:
                 continue
-            if FROM_LINE_RE.match(change.search) and FROM_LINE_RE.match(change.replacement):
+            if FROM_LINE_RE.match(change.search) and FROM_LINE_RE.match(
+                change.replacement
+            ):
                 upgrades.append(
                     {
                         "file": change.file_path,
@@ -290,7 +294,9 @@ class Orchestrator:
         return upgrades
 
     def _print_base_image_table(self, upgrades: list[dict]) -> None:
-        table = Table(title="🐳 Base Image Upgrades (root-cause remediation)", show_lines=True)
+        table = Table(
+            title="🐳 Base Image Upgrades (root-cause remediation)", show_lines=True
+        )
         table.add_column("File", style="bold")
         table.add_column("Original Base Image")
         table.add_column("Upgraded Base Image")

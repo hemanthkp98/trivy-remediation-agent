@@ -224,7 +224,9 @@ class LLMAnalyzer:
         base_image_cfg = config.get("base_image", {})
         self.base_image_enabled = bool(base_image_cfg.get("enabled", True))
         self.base_image_strategy = base_image_cfg.get("strategy", "patch")
-        self.base_image_fallback = bool(base_image_cfg.get("fallback_to_package_pin", True))
+        self.base_image_fallback = bool(
+            base_image_cfg.get("fallback_to_package_pin", True)
+        )
 
     def analyze(
         self,
@@ -357,7 +359,11 @@ class LLMAnalyzer:
         for ref in refs:
             candidate = resolver.suggest(ref)
             matched_target = next(
-                (t for t in os_targets if BaseImageParser.find_for_target(refs, t) is ref),
+                (
+                    t
+                    for t in os_targets
+                    if BaseImageParser.find_for_target(refs, t) is ref
+                ),
                 None,
             )
             if candidate is None and matched_target is None:
