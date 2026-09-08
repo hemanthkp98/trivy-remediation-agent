@@ -17,4 +17,4 @@ _(none)_
 
 ## Done
 
-1. [Intelligent Base Image Upgrade (Root-Cause OS Remediation)](./base-image-upgrade.md) — `P0` — Standalone (Completed: 2026-09-07)
+1. [Intelligent Base Image Upgrade (Root-Cause OS Remediation)](../feature-planning/base-image-upgrade.md) — `P0` — Standalone (Completed: 2026-09-07)
